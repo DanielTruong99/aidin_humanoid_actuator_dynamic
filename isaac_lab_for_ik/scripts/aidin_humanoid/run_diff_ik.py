@@ -48,13 +48,27 @@ from isaaclab.markers.config import FRAME_MARKER_CFG, CUBOID_MARKER_CFG
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.math import subtract_frame_transforms
+from isaaclab.utils.math import subtract_frame_transforms, quat_rotate
 
 ##
 # Pre-defined configs
 ##
 from isaaclab_assets import FRANKA_PANDA_HIGH_PD_CFG, UR10_CFG  # isort:skip
 from isaac_lab_for_ik.assets import LEGPARKOUR_IK_CFG, LEGPARKOUR_IK_VISUAL_CFG # isort:skip
+
+import rclpy
+from sensor_msgs.msg import JointState
+from isaacsim.core.utils.extensions import enable_extension
+
+
+enable_extension("isaacsim.ros2.bridge")
+simulation_app.update()
+rclpy.init()
+node = rclpy.create_node("diff_ik_node")
+# create ros2 joint state publisher
+joint_state_publisher = node.create_publisher(
+    JointState, "/joint_states", 15
+)
 
 @configclass
 class TableTopSceneCfg(InteractiveSceneCfg):
@@ -102,10 +116,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     
 
     # Define goals for the arm
-    a = 0.15; b = 0.1;
-    w = 1; n = 300;
+    a = 0.11; b = 0.1;
+    w = 1.5; n = 300;
     t = torch.linspace(0, 10, n, device=sim.device)
-    xo = 0.25; zo = 0.35; 
+    xo = 0.15; zo = 0.39; 
     x = a * torch.cos(w * t) + xo;
     z = b * torch.sin(w * t) + zo;
     y = 0.1175;
@@ -148,20 +162,22 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
     # Define simulation stepping
     sim_dt = sim.get_physics_dt()
-    count = 0
+    count_planner = 0; count_marker = 0; count_ros2_publish = 0
     ee_tracer_vis = torch.zeros(50, 3, device=sim.device)
     ee_tracer_vis = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:3].unsqueeze(1).expand(-1, 50, -1).squeeze()
 
+    # reset
+    # sampling time 100hz; planner_max_count = 1/100 / sim_dt
+    # sampling time for markers 10hz; marker_max_count = 1/10 / sim_dt
+    planner_max_count = (1/100) / sim_dt
+    marker_max_count = (1/50) / sim_dt
+    ros2_publish_max_count = (1/50) / sim_dt
+
     # Simulation loop
     while simulation_app.is_running():
-        # reset
-        # sampling time 100hz; planner_max_count = 1/100 / sim_dt
-        # sampling time for markers 10hz; marker_max_count = 1/10 / sim_dt
-        planner_max_count = (1/100) / sim_dt
-        marker_max_count = (1/10) / sim_dt
-        if count % planner_max_count == 0:
+        if count_planner % planner_max_count == 0:
             # reset time
-            count = 0
+            count_planner = 0
             
             # reset actions
             ik_commands[:] = ee_goals[current_goal_idx]; ik_commands[:, 0:3] = ik_commands[:, 0:3] - robot.data.root_state_w[:, 0:3]
@@ -175,25 +191,36 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             # change goal
             current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
 
-            # set the tracing position marker
-            if count % marker_max_count == 0:
-                ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-                ee_tracer_vis = torch.roll(ee_tracer_vis, shifts=1, dims=0)
-                ee_tracer_vis[0, :] = ee_pose_w[:, 0:3]
-        else:
-            # obtain quantities from simulation
-            jacobian = robot.root_physx_view.get_jacobians()[:, ee_jacobi_idx, :, robot_entity_cfg.joint_ids]
-            ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-            root_pose_w = robot.data.root_state_w[:, 0:7]
-            joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+        # publish joint state
+        if count_ros2_publish % ros2_publish_max_count == 0:
+            joint_state_msg = JointState()
+            joint_state_msg.header.stamp = node.get_clock().now().to_msg()
+            joint_state_msg.position = robot.data.joint_pos[:, robot_entity_cfg.joint_ids].cpu().numpy().flatten().tolist()
+            joint_state_publisher.publish(joint_state_msg)
 
-            # compute frame in root frame
-            ee_pos_b, ee_quat_b = subtract_frame_transforms(
-                root_pose_w[:, 0:3], root_pose_w[:, 3:7], ee_pose_w[:, 0:3], ee_pose_w[:, 3:7]
-            )
+        # set the tracing position marker
+        if count_marker % marker_max_count == 0:
+            ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7];
+            ee_pose_w[:, 0:3] = ee_pose_w[:, 0:3] + quat_rotate(ee_pose_w[:, 3:7], torch.tensor([[0.0, 0.013, 0.0]], device=sim.device))
+            ee_tracer_vis = torch.roll(ee_tracer_vis, shifts=1, dims=0)
+            ee_tracer_vis[0, :] = ee_pose_w[:, 0:3]
+        
 
-            # compute the joint commands
-            joint_pos_des = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
+
+        # obtain quantities from simulation
+        jacobian = robot.root_physx_view.get_jacobians()[:, ee_jacobi_idx, :, robot_entity_cfg.joint_ids]
+        ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7];
+        ee_pose_w[:, 0:3] = ee_pose_w[:, 0:3] + quat_rotate(ee_pose_w[:, 3:7], torch.tensor([[0.0, 0.013, 0.0]], device=sim.device))
+        root_pose_w = robot.data.root_state_w[:, 0:7]
+        joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+
+        # compute frame in root frame
+        ee_pos_b, ee_quat_b = subtract_frame_transforms(
+            root_pose_w[:, 0:3], root_pose_w[:, 3:7], ee_pose_w[:, 0:3], ee_pose_w[:, 3:7]
+        )
+
+        # compute the joint commands
+        joint_pos_des = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
             
 
         # apply actions
@@ -204,13 +231,15 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         sim.step()
 
         # update sim-time
-        count += 1
+        count_planner += 1
+        count_marker += 1
+        count_ros2_publish += 1
 
         # update buffers
         scene.update(sim_dt)
 
         # update marker positions
-        ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]; ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
+        ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
         ee_pos_tracing_marker.visualize(ee_tracer_vis[:, 0:3])
         goal_marker.visualize(ee_goals[:, 0:3], ee_goals[:, 3:7])
 
