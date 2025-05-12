@@ -43,15 +43,15 @@ LEGPARKOUR_IK_CFG = ArticulationCfg(
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
-        "legs": IdealPDActuatorCfg(
+        "legs": ImplicitActuatorCfg(
             joint_names_expr=[".*_hip_joint", ".*_hip2_joint", ".*_thigh_joint", ".*_calf_joint"],
-            effort_limit=300.0,
-            velocity_limit=100.0,
+            effort_limit=1000.0,
+            velocity_limit=1000.0,
             stiffness={
-                "L_hip_joint": 300.0,
-                "L_hip2_joint": 300.0,
-                "L_thigh_joint": 300.0,
-                "L_calf_joint": 300.0,
+                "L_hip_joint": 10000.0,
+                "L_hip2_joint": 10000.0,
+                "L_thigh_joint": 10000.0,
+                "L_calf_joint": 10000.0,
             },
             damping={
                 ".*_hip_joint": 10.0,
@@ -60,11 +60,11 @@ LEGPARKOUR_IK_CFG = ArticulationCfg(
                 ".*_calf_joint": 10.0,
             },
         ),
-        "feet": IdealPDActuatorCfg(
+        "feet": ImplicitActuatorCfg(
             joint_names_expr=[".*_toe_joint"],
-            effort_limit=50.0,
-            velocity_limit=10.0,
-            stiffness={"L_toe_joint": 100.0},
+            effort_limit=1000.0,
+            velocity_limit=1000.0,
+            stiffness={"L_toe_joint": 10000.0},
             damping={"L_toe_joint": 10.0},
         ),
     },
