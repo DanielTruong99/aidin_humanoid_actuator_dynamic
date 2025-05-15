@@ -1,10 +1,12 @@
 import os
+import math
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ActuatorNetMLPCfg, DCMotorCfg, ImplicitActuatorCfg, IdealPDActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 from isaac_lab_for_ik.assets import LOCAL_ASSETS_DATA_DIR
 
-LEGPARKOUR_USD_PATH = f"{LOCAL_ASSETS_DATA_DIR}/Robots/Aidin/leg00/leg00.usd"
+# LEGPARKOUR_USD_PATH = f"{LOCAL_ASSETS_DATA_DIR}/Robots/Aidin/leg00/leg00.usd"
+LEGPARKOUR_USD_PATH = f"{LOCAL_ASSETS_DATA_DIR}/Robots/Aidin/leg05/hr.usd"
 
 LEGPARKOUR_IK_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
@@ -30,14 +32,14 @@ LEGPARKOUR_IK_CFG = ArticulationCfg(
         joint_pos={
             'R_hip_joint': 0.0,
             'R_hip2_joint': 0.0,
-            'R_thigh_joint': 0.0,
-            'R_calf_joint': 0.0,  # 0.6
-            'R_toe_joint': 0.0,
+            'R_thigh_joint': -math.pi / 4,
+            'R_calf_joint': +math.pi / 2,  # 0.6
+            'R_toe_joint': -math.pi / 4,
             'L_hip_joint': 0.0,
             'L_hip2_joint': 0.0,
-            'L_thigh_joint': 0.0,
-            'L_calf_joint': 0.0,  # 0.6
-            'L_toe_joint': 0.0,
+            'L_thigh_joint': -math.pi / 4,
+            'L_calf_joint': math.pi / 2,  # 0.6
+            'L_toe_joint': -math.pi / 4,
         },
         joint_vel={".*": 0.0},
     ),
