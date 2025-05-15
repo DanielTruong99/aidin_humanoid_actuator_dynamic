@@ -50,6 +50,8 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.math import subtract_frame_transforms, quat_rotate
 
+
+from isaac_lab_for_ik.controllers.custom_differential_ik import CustomDifferentialIKController
 ##
 # Pre-defined configs
 ##
@@ -101,10 +103,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
     # Create controller
     diff_ik_cfg = DifferentialIKControllerCfg(command_type="pose", use_relative_mode=False, ik_method="dls", ik_params={"lambda_val": 0.01/2})
-    diff_ik_controller = DifferentialIKController(diff_ik_cfg, num_envs=scene.num_envs, device=sim.device)
+    diff_ik_controller = CustomDifferentialIKController(diff_ik_cfg, num_envs=scene.num_envs, device=sim.device)
 
     # Markers
-    point_marker_cfg = CUBOID_MARKER_CFG.copy(); point_marker_cfg.markers["cuboid"].size = (0.007, 0.007, 0.007)
+    point_marker_cfg = CUBOID_MARKER_CFG.copy(); point_marker_cfg.markers["cuboid"].size = (0.003, 0.003, 0.003)
     point_marker_cfg.markers["cuboid"].visual_material.diffuse_color = (0.0, 0.0, 1.0)
     frame_marker_cfg = FRAME_MARKER_CFG.copy()
     frame_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
@@ -116,18 +118,37 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     
 
     # Define goals for the arm
-    a = 0.11; b = 0.1;
-    w = 1.5; n = 300;
-    t = torch.linspace(0, 10, n, device=sim.device)
-    xo = 0.15; zo = 0.39; 
-    x = a * torch.cos(w * t) + xo;
-    z = b * torch.sin(w * t) + zo;
-    y = 0.1175;
+    #! Eclipse trajectory
+    # a = 0.11; b = 0.1;
+    # w = 0.7; n = 300;
+    # t = torch.linspace(0, 10, n, device=sim.device)
+    # xo = 0.15; zo = 0.39; 
+    # x = a * torch.cos(w * t) + xo;
+    # z = b * torch.sin(w * t) + zo;
+    # y = 0.1175;
+    # pos = torch.cat([x.unsqueeze(1), torch.ones(n, 1, device=sim.device) * y, z.unsqueeze(1)], dim=1)
+    # orient = torch.zeros(n, 4, device=sim.device); orient[:, 0] = 1.0
+    # ee_goals = torch.cat([pos, orient], dim=1)
+    # ee_goals = torch.tensor(ee_goals, device=sim.device)
 
-    pos = torch.cat([x.unsqueeze(1), torch.ones(n, 1, device=sim.device) * y, z.unsqueeze(1)], dim=1)
+    #! Eclipsoid trajectory
+    a = 0.11; b = 0.1; c = 0.08;
+    n = 2000;
+    t = torch.linspace(0, 10, n);
+    A_phi = 12; w_phi = 1.7;
+    A_theta = 3.4; w_theta = 0.265;
+    xo = 0.11; zo = 0.39; yo = 0.1175;
+    phi_0 = -A_phi/w_phi; theta_0 = -A_phi/w_phi;
+    phi = -A_phi/w_phi * torch.cos(w_phi * t) + A_phi/w_phi + phi_0;
+    theta = -A_theta/w_theta * torch.cos(w_theta * t) + A_theta/w_theta + theta_0;
+    x = a * torch.cos(theta) * torch.cos(phi) + xo;
+    y = b * torch.cos(theta) * torch.sin(phi) + yo;
+    z = c * torch.sin(theta) + zo;
+    pos = torch.cat([x.unsqueeze(1), y.unsqueeze(1), z.unsqueeze(1)], dim=1)
     orient = torch.zeros(n, 4, device=sim.device); orient[:, 0] = 1.0
     ee_goals = torch.cat([pos, orient], dim=1)
     ee_goals = torch.tensor(ee_goals, device=sim.device)
+
 
     # Track the given command
     current_goal_idx = 0
@@ -172,6 +193,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     planner_max_count = (1/100) / sim_dt
     marker_max_count = (1/50) / sim_dt
     ros2_publish_max_count = (1/50) / sim_dt
+    position_error = 9999.9
+    stage = 0
 
     # Simulation loop
     while simulation_app.is_running():
@@ -186,7 +209,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
             # set the command
             diff_ik_controller.reset()
-            diff_ik_controller.set_command(ik_commands, ee_quat=ee_goals[current_goal_idx, 3:7])
+            diff_ik_controller.set_command(ik_commands)
 
             # change goal
             current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
@@ -218,6 +241,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         ee_pos_b, ee_quat_b = subtract_frame_transforms(
             root_pose_w[:, 0:3], root_pose_w[:, 3:7], ee_pose_w[:, 0:3], ee_pose_w[:, 3:7]
         )
+        position_error = torch.norm(ee_pos_b, dim=1)
 
         # compute the joint commands
         joint_pos_des = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
@@ -247,7 +271,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 def main():
     """Main function."""
     # Load kit helper
-    sim_cfg = sim_utils.SimulationCfg(dt=1/500.0, device=args_cli.device)
+    sim_cfg = sim_utils.SimulationCfg(dt=1/200.0, device=args_cli.device)
     sim = sim_utils.SimulationContext(sim_cfg)
 
     # Set main camera
