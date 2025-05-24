@@ -1,0 +1,22 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/opt/ros/humble/include/**",
+        "/home/danieltruong/DanielWorkspace/aidin_humanoid_actuator_dynamic/ros2_ws/src/joint_planner/include/**",
+        "/usr/include/**",
+        "/home/danieltruong/DanielWorkspace/aidin_humanoid_actuator_dynamic/ros2_ws/src/joint_planner/src/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}
