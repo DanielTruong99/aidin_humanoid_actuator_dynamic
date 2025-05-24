@@ -60,7 +60,11 @@ from isaac_lab_for_ik.assets import LEGPARKOUR_IK_CFG, LEGPARKOUR_IK_VISUAL_CFG 
 
 import rclpy
 from sensor_msgs.msg import JointState
+from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped
 from isaacsim.core.utils.extensions import enable_extension
+import pandas as pd
+import os
 
 
 enable_extension("isaacsim.ros2.bridge")
@@ -71,6 +75,10 @@ node = rclpy.create_node("diff_ik_node")
 joint_state_publisher = node.create_publisher(
     JointState, "/joint_states", 15
 )
+path_publisher = node.create_publisher(
+    Path, "/path", 15
+)
+
 
 @configclass
 class TableTopSceneCfg(InteractiveSceneCfg):
@@ -137,7 +145,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     t = torch.linspace(0, 10, n);
     A_phi = 12; w_phi = 1.7;
     A_theta = 3.4; w_theta = 0.265;
-    xo = 0.11; zo = 0.39; yo = 0.1175;
+    xo = 0.11; zo = 0.45; yo = 0.1175;
     phi_0 = -A_phi/w_phi; theta_0 = -A_phi/w_phi;
     phi = -A_phi/w_phi * torch.cos(w_phi * t) + A_phi/w_phi + phi_0;
     theta = -A_theta/w_theta * torch.cos(w_theta * t) + A_theta/w_theta + theta_0;
@@ -195,6 +203,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     ros2_publish_max_count = (1/50) / sim_dt
     position_error = 9999.9
     stage = 0
+    data = {}
 
     # Simulation loop
     while simulation_app.is_running():
@@ -217,9 +226,54 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         # publish joint state
         if count_ros2_publish % ros2_publish_max_count == 0:
             joint_state_msg = JointState()
+            joint_state_msg.name = robot_entity_cfg.joint_names
             joint_state_msg.header.stamp = node.get_clock().now().to_msg()
             joint_state_msg.position = robot.data.joint_pos[:, robot_entity_cfg.joint_ids].cpu().numpy().flatten().tolist()
             joint_state_publisher.publish(joint_state_msg)
+
+            #! write the joint state to csv
+            if current_goal_idx > 10 and current_goal_idx < len(ee_goals) - 2:
+                # Prepare data
+                joint_names = robot_entity_cfg.joint_names
+                joint_positions = robot.data.joint_pos[:, robot_entity_cfg.joint_ids].cpu().numpy().flatten().tolist()
+                timestamp = node.get_clock().now().nanoseconds / 1e9
+                
+                if "timestamp" not in data:
+                    data["timestamp"] = []
+                data["timestamp"].append(timestamp)
+                for i, name in enumerate(joint_names):
+                    if name not in data:
+                        data[name] = []
+                    data[name].append(joint_positions[i])
+
+
+            elif current_goal_idx > len(ee_goals) - 2:
+                # Save joint states to a pandas DataFrame and export to CSV
+                first_time = data["timestamp"][0]
+                data["timestamp"] = [time - first_time for time in data["timestamp"]]
+
+                data_frame = pd.DataFrame(data)
+                csv_path = "joint_states.csv"
+                data_frame.to_csv(csv_path, index=False)
+                data = {}
+
+                
+
+            #! publish the path topic
+            path_msg = Path()
+            path_msg.header.frame_id = "map"
+            path_msg.header.stamp = node.get_clock().now().to_msg()
+            path_msg.poses = []
+            for i in range(ee_tracer_vis.shape[0]):
+                pose = ee_tracer_vis[i, :]
+                pose_msg = PoseStamped()
+                pose_msg.header.frame_id = "map"
+                pose_msg.header.stamp = node.get_clock().now().to_msg()
+                pose_msg.pose.position.x = pose[0].item()
+                pose_msg.pose.position.y = pose[1].item()
+                pose_msg.pose.position.z = pose[2].item() - 1.0
+                path_msg.poses.append(pose_msg)
+            path_publisher.publish(path_msg)
 
         # set the tracing position marker
         if count_marker % marker_max_count == 0:

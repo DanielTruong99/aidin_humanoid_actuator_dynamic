@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "browse": {
+                "databaseFilename": "${default}",
+                "limitSymbolsToIncludedHeaders": false
+            },
+            "includePath": [
+                "/opt/ros/foxy/include/**",
+                "/home/gene/DanielWorkspace/ros2_ws/src/motor_driver/include/**",
+                "/usr/include/**",
+                "/usr/xenomai/include/**",
+                "/usr/xenomai/include/cobalt/**",
+                "/usr/include/soem/**",
+            ],
+            "name": "ROS",
+            "intelliSenseMode": "gcc-x64",
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu11",
+            "cppStandard": "c++14"
+        }
+    ],
+    "version": 4
+}
